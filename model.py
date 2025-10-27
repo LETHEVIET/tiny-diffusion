@@ -329,48 +329,31 @@ def build_vocab(text):
     return char_to_idx, idx_to_char, len(char_to_idx)
 
 
-def encode_text(text, tokenizer_or_char_to_idx):
+def encode_text(text, char_to_idx):
     """
-    Convert text to vocab indices
-    Supports both HuggingFace tokenizer and character-level mapping for backward compatibility
+    Convert text to vocab indices using character-level encoding
 
     Args:
         text: Input text string
-        tokenizer_or_char_to_idx: Either a HuggingFace tokenizer or character-to-index dict
+        char_to_idx: Character-to-index mapping dictionary
 
     Returns:
         tokens: Tensor of token indices
     """
-    # Check if it's a dict (old char_to_idx format)
-    if isinstance(tokenizer_or_char_to_idx, dict):
-        # Character-level encoding (backward compatible)
-        tokens = torch.tensor([tokenizer_or_char_to_idx[c] for c in text], dtype=torch.long)
-    else:
-        # HuggingFace tokenizer
-        tokens = tokenizer_or_char_to_idx.encode(text, add_special_tokens=False)
-        tokens = torch.tensor(tokens, dtype=torch.long)
+    tokens = torch.tensor([char_to_idx[c] for c in text], dtype=torch.long)
     return tokens
 
 
-def decode_tokens(tokens, tokenizer_or_idx_to_char):
+def decode_tokens(tokens, idx_to_char):
     """
-    Convert vocab indices to text
-    Supports both HuggingFace tokenizer and character-level mapping for backward compatibility
+    Convert vocab indices to text using character-level decoding
 
     Args:
         tokens: Token indices (tensor or list)
-        tokenizer_or_idx_to_char: Either a HuggingFace tokenizer or index-to-character dict
+        idx_to_char: Index-to-character mapping dictionary
 
     Returns:
         text: Decoded text string
     """
-    # Check if it's a dict (old idx_to_char format)
-    if isinstance(tokenizer_or_idx_to_char, dict):
-        # Character-level decoding (backward compatible)
-        text = "".join([tokenizer_or_idx_to_char.get(int(t), "") for t in tokens])
-    else:
-        # HuggingFace tokenizer
-        if isinstance(tokens, torch.Tensor):
-            tokens = tokens.tolist()
-        text = tokenizer_or_idx_to_char.decode(tokens, skip_special_tokens=False)
+    text = "".join([idx_to_char.get(int(t), "") for t in tokens])
     return text
