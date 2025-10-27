@@ -319,13 +319,58 @@ class MaskedDiffusionSchedule:
         return self.mask_probs[t].item()
 
 
-def encode_text(text):
-    """Convert text to vocab indices using direct ASCII mapping"""
-    tokens = torch.tensor([min(ord(c), 127) for c in text], dtype=torch.long)
+def build_vocab(text):
+    """Build character vocabulary from text"""
+    chars = sorted(set(text))
+    # Reserve 0 for mask token
+    char_to_idx = {ch: i + 1 for i, ch in enumerate(chars)}
+    char_to_idx['\x00'] = 0  # mask token
+    idx_to_char = {i: ch for ch, i in char_to_idx.items()}
+    return char_to_idx, idx_to_char, len(char_to_idx)
+
+
+def encode_text(text, tokenizer_or_char_to_idx):
+    """
+    Convert text to vocab indices
+    Supports both HuggingFace tokenizer and character-level mapping for backward compatibility
+
+    Args:
+        text: Input text string
+        tokenizer_or_char_to_idx: Either a HuggingFace tokenizer or character-to-index dict
+
+    Returns:
+        tokens: Tensor of token indices
+    """
+    # Check if it's a dict (old char_to_idx format)
+    if isinstance(tokenizer_or_char_to_idx, dict):
+        # Character-level encoding (backward compatible)
+        tokens = torch.tensor([tokenizer_or_char_to_idx[c] for c in text], dtype=torch.long)
+    else:
+        # HuggingFace tokenizer
+        tokens = tokenizer_or_char_to_idx.encode(text, add_special_tokens=False)
+        tokens = torch.tensor(tokens, dtype=torch.long)
     return tokens
 
 
-def decode_tokens(tokens):
-    """Convert vocab indices to text using direct ASCII mapping"""
-    text = "".join([chr(int(t)) for t in tokens])
+def decode_tokens(tokens, tokenizer_or_idx_to_char):
+    """
+    Convert vocab indices to text
+    Supports both HuggingFace tokenizer and character-level mapping for backward compatibility
+
+    Args:
+        tokens: Token indices (tensor or list)
+        tokenizer_or_idx_to_char: Either a HuggingFace tokenizer or index-to-character dict
+
+    Returns:
+        text: Decoded text string
+    """
+    # Check if it's a dict (old idx_to_char format)
+    if isinstance(tokenizer_or_idx_to_char, dict):
+        # Character-level decoding (backward compatible)
+        text = "".join([tokenizer_or_idx_to_char.get(int(t), "") for t in tokens])
+    else:
+        # HuggingFace tokenizer
+        if isinstance(tokens, torch.Tensor):
+            tokens = tokens.tolist()
+        text = tokenizer_or_idx_to_char.decode(tokens, skip_special_tokens=False)
     return text

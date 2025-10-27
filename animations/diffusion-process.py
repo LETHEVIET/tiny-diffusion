@@ -16,6 +16,7 @@ from matplotlib.animation import FuncAnimation
 from model import (
     DiffusionTransformer,
     DiffusionConfig,
+    build_vocab,
     encode_text,
     decode_tokens,
     MaskedDiffusionSchedule,
@@ -24,29 +25,42 @@ from model import (
 
 def load_model(checkpoint_path, device):
     """Load a trained model from checkpoint"""
-    config = DiffusionConfig()
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    
+    if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+        model_state_dict = checkpoint["model_state_dict"]
+        char_to_idx = checkpoint["char_to_idx"]
+        idx_to_char = checkpoint["idx_to_char"]
+        config = checkpoint["config"]
+    else:
+        model_state_dict = checkpoint
+        config = DiffusionConfig()
+        char_to_idx = None
+        idx_to_char = None
+    
     model = DiffusionTransformer(config).to(device)
-    model.load_state_dict(torch.load(checkpoint_path, map_location=device))
+    model.load_state_dict(model_state_dict)
     model.eval()
-    return model
+    return model, char_to_idx, idx_to_char
 
 
-def load_initial_context(data_path, context_len):
+def load_initial_context(data_path, context_len, char_to_idx):
     """Load the first context_len characters from dataset"""
     with open(data_path, "r", encoding="utf-8") as f:
         text = f.read()[:context_len]
-    tokens = encode_text(text)
+    tokens = encode_text(text, char_to_idx)
     return tokens
 
 
 def generate_with_visualization(
-    model, num_blocks=5, temperature=1.0, dataset_tokens=None
+    model, idx_to_char, num_blocks=5, temperature=1.0, dataset_tokens=None
 ):
     """
     Generate samples and visualize each denoising step
 
     Args:
         model: The trained diffusion model
+        idx_to_char: Index to character mapping
         num_blocks: Number of blocks to generate
         temperature: Sampling temperature
         dataset_tokens: Dataset tokens for initial context (if context_len > 0)
@@ -145,7 +159,7 @@ def generate_with_visualization(
             row_end = min(row_start + chars_per_row, seq_len)
             row_text = ""
             for idx in range(row_start, row_end):
-                char = decode_tokens([x[0, idx].item()])
+                char = decode_tokens([x[0, idx].item()], idx_to_char)
                 if char == "\n":
                     char = "↵"
                 row_text += char
@@ -226,7 +240,7 @@ def generate_with_visualization(
                 if mask[idx]:
                     row_text += "█"
                 else:
-                    char = decode_tokens([frame_tokens[idx]])
+                    char = decode_tokens([frame_tokens[idx]], idx_to_char)
                     if char == "\n":
                         char = "↵"
                     row_text += char
@@ -275,21 +289,28 @@ def main():
     # Load model
     checkpoint_path = "weights/diffusion_model.pt"
     print(f"Loading model from {checkpoint_path}...")
-    model = load_model(checkpoint_path, device)
+    model, char_to_idx, idx_to_char = load_model(checkpoint_path, device)
     print("Model loaded!\n")
 
     # Load dataset tokens for initial context if context_len > 0
     dataset_tokens = None
     if model.config.context_len > 0:
         print("Loading initial context from dataset...")
+        if char_to_idx is None:
+            # Old checkpoint - build vocab
+            data_path = "data/tiny_shakespeare.txt"
+            with open(data_path, "r", encoding="utf-8") as f:
+                text = f.read()
+            char_to_idx, idx_to_char, _ = build_vocab(text)
         dataset_tokens = load_initial_context(
-            "data/tiny_shakespeare.txt", model.config.sequence_len
+            "data/tiny_shakespeare.txt", model.config.sequence_len, char_to_idx
         )
         print(f"Loaded {len(dataset_tokens)} tokens\n")
 
     # Generate with visualization
     generate_with_visualization(
         model,
+        idx_to_char,
         num_blocks=6,
         temperature=0.1,
         dataset_tokens=dataset_tokens,

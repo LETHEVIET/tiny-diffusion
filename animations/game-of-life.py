@@ -15,6 +15,7 @@ from matplotlib.animation import FuncAnimation
 from model import (
     DiffusionTransformer,
     DiffusionConfig,
+    build_vocab,
     encode_text,
     decode_tokens,
     MaskedDiffusionSchedule,
@@ -23,13 +24,24 @@ from model import (
 
 def load_model(checkpoint_path, device):
     """Load a trained model from checkpoint"""
-    config = DiffusionConfig()  # default config
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    
+    if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+        model_state_dict = checkpoint["model_state_dict"]
+        char_to_idx = checkpoint["char_to_idx"]
+        idx_to_char = checkpoint["idx_to_char"]
+        config = checkpoint["config"]
+    else:
+        model_state_dict = checkpoint
+        config = DiffusionConfig()
+        char_to_idx = None
+        idx_to_char = None
 
     model = DiffusionTransformer(config).to(device)
-    model.load_state_dict(torch.load(checkpoint_path, map_location=device))
+    model.load_state_dict(model_state_dict)
     model.eval()
 
-    return model
+    return model, char_to_idx, idx_to_char
 
 
 def apply_game_of_life_rules(grid):
@@ -72,7 +84,7 @@ def tokens_to_grid(tokens):
     return grid
 
 
-def display_grid(grid, tokens, mask=None):
+def display_grid(grid, tokens, idx_to_char, mask=None):
     """Display the 16x16 grid with characters"""
     print("=" * 18)
     for i in range(16):
@@ -84,7 +96,7 @@ def display_grid(grid, tokens, mask=None):
                 row += "⬛"
             else:
                 # Decode single token
-                char = decode_tokens([tokens[idx]])
+                char = decode_tokens([tokens[idx]], idx_to_char)
                 # Replace newline with space
                 if char == "\n":
                     char = " "
@@ -93,7 +105,7 @@ def display_grid(grid, tokens, mask=None):
     print("=" * 18)
 
 
-def load_initial_text(data_path, num_chars=1024):
+def load_initial_text(data_path, char_to_idx, num_chars=1024):
     """Load initial text from data file"""
     with open(data_path, "r", encoding="utf-8") as f:
         text = f.read()[:num_chars]
@@ -103,12 +115,12 @@ def load_initial_text(data_path, num_chars=1024):
         text = text + " " * (num_chars - len(text))
 
     # Convert to tokens
-    tokens = encode_text(text)
+    tokens = encode_text(text, char_to_idx)
     return tokens
 
 
 def generate_with_game_of_life(
-    model, initial_tokens, num_iterations=10, temperature=1.0
+    model, idx_to_char, initial_tokens, num_iterations=10, temperature=1.0
 ):
     """
     Generate samples using Game of Life rules to determine masking
@@ -116,6 +128,9 @@ def generate_with_game_of_life(
     Works on 32x32 grid (1024 tokens) by processing in 256-token chunks
 
     Args:
+        model: The trained diffusion model
+        idx_to_char: Index to character mapping
+        initial_tokens: Initial token sequence (1024 tokens for 32x32 grid)
         model: The trained diffusion model
         initial_tokens: Initial 1024 tokens (32x32 grid)
         num_iterations: Number of Game of Life iterations to run
@@ -252,7 +267,7 @@ def generate_with_game_of_life(
                     row_text += "■"
                 else:
                     # Decode single token
-                    char = decode_tokens([frame_tokens[idx]])
+                    char = decode_tokens([frame_tokens[idx]], idx_to_char)
                     row_text += char
             lines.append(row_text)
 
@@ -280,7 +295,7 @@ def generate_with_game_of_life(
                     row_text += "■"
                 else:
                     # Decode single token
-                    char = decode_tokens([frame_tokens[idx]])
+                    char = decode_tokens([frame_tokens[idx]], idx_to_char)
                     row_text += char
             lines.append(row_text)
 
@@ -323,17 +338,26 @@ def main():
     # Load model
     checkpoint_path = "weights/diffusion_model.pt"
     print(f"Loading model from {checkpoint_path}...")
-    model = load_model(checkpoint_path, device)
+    model, char_to_idx, idx_to_char = load_model(checkpoint_path, device)
     print("Model loaded!\n")
+
+    # Handle old checkpoint format
+    if char_to_idx is None:
+        print("Old checkpoint format detected - building vocab from dataset...")
+        data_path = "data/tiny_shakespeare.txt"
+        with open(data_path, "r", encoding="utf-8") as f:
+            text = f.read()
+        char_to_idx, idx_to_char, _ = build_vocab(text)
 
     # Load initial text
     print("Loading initial text from data/tiny_shakespeare.txt...")
-    initial_tokens = load_initial_text("data/tiny_shakespeare.txt", num_chars=1024)
+    initial_tokens = load_initial_text("data/tiny_shakespeare.txt", char_to_idx, num_chars=1024)
     print(f"Loaded {len(initial_tokens)} characters\n")
 
     # Generate with Game of Life dynamics
     generate_with_game_of_life(
         model,
+        idx_to_char,
         initial_tokens,
         num_iterations=10,
         temperature=1.0,
