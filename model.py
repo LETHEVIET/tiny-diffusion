@@ -319,9 +319,56 @@ class MaskedDiffusionSchedule:
         return self.mask_probs[t].item()
 
 
-def build_vocab(text):
-    """Build character vocabulary from text"""
-    chars = sorted(set(text))
+def build_vocab(text, include_case_variants=True, include_common_emojis=True):
+    """
+    Build character vocabulary from text
+
+    Args:
+        text: Training text to extract characters from
+        include_case_variants: If True, include both uppercase and lowercase versions of all letters
+        include_common_emojis: If True, include common emoji characters
+
+    Returns:
+        char_to_idx: Character to index mapping
+        idx_to_char: Index to character mapping
+        vocab_size: Size of vocabulary
+    """
+    chars = set(text)
+
+    # Add both uppercase and lowercase versions of all characters
+    # This is important for Vietnamese which has many accented characters
+    if include_case_variants:
+        extended_chars = set()
+        for ch in chars:
+            extended_chars.add(ch)
+            extended_chars.add(ch.upper())
+            extended_chars.add(ch.lower())
+        chars = extended_chars
+
+    # Add common emojis
+    if include_common_emojis:
+        common_emojis = [
+            '😀', '😁', '😂', '🤣', '😃', '😄', '😅', '😆', '😉', '😊',
+            '😋', '😎', '😍', '😘', '🥰', '😗', '😙', '😚', '☺️', '🙂',
+            '🤗', '🤩', '🤔', '🤨', '😐', '😑', '😶', '🙄', '😏', '😣',
+            '😥', '😮', '🤐', '😯', '😪', '😫', '😴', '😌', '😛', '😜',
+            '😝', '🤤', '😒', '😓', '😔', '😕', '🙃', '🤑', '😲', '☹️',
+            '🙁', '😖', '😞', '😟', '😤', '😢', '😭', '😦', '😧', '😨',
+            '😩', '🤯', '😬', '😰', '😱', '🥵', '🥶', '😳', '🤪', '😵',
+            '😡', '😠', '🤬', '😷', '🤒', '🤕', '🤢', '🤮', '🤧', '😇',
+            '🥳', '🥺', '🤠', '🤡', '🤥', '🤫', '🤭', '🧐', '🤓', '😈',
+            '👿', '👻', '💀', '☠️', '👽', '👾', '🤖', '🎃', '😺', '😸',
+            '😹', '😻', '😼', '😽', '🙀', '😿', '😾',
+            '❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '🤎', '💔',
+            '❣️', '💕', '💞', '💓', '💗', '💖', '💘', '💝',
+            '👍', '👎', '👌', '✌️', '🤞', '🤟', '🤘', '🤙', '👈', '👉',
+            '👆', '👇', '☝️', '✋', '🤚', '🖐️', '🖖', '👋', '🤝', '💪',
+            '🙏', '✍️', '👏', '🙌',
+            '🔥', '✨', '💫', '⭐', '🌟', '💯', '✅', '❌', '⚠️', '‼️',
+        ]
+        chars.update(common_emojis)
+
+    chars = sorted(chars)
     # Reserve 0 for mask token
     char_to_idx = {ch: i + 1 for i, ch in enumerate(chars)}
     char_to_idx['\x00'] = 0  # mask token
@@ -329,18 +376,38 @@ def build_vocab(text):
     return char_to_idx, idx_to_char, len(char_to_idx)
 
 
-def encode_text(text, char_to_idx):
+def encode_text(text, char_to_idx, unk_token_id=None, verbose=True):
     """
     Convert text to vocab indices using character-level encoding
 
     Args:
         text: Input text string
         char_to_idx: Character-to-index mapping dictionary
+        unk_token_id: Token ID to use for unknown characters. If None, raises KeyError for unknown chars.
+        verbose: If True, log unknown characters to terminal
 
     Returns:
         tokens: Tensor of token indices
     """
-    tokens = torch.tensor([char_to_idx[c] for c in text], dtype=torch.long)
+    token_list = []
+    unknown_chars = set()
+
+    for c in text:
+        if c in char_to_idx:
+            token_list.append(char_to_idx[c])
+        elif unk_token_id is not None:
+            token_list.append(unk_token_id)
+            unknown_chars.add(c)
+        else:
+            raise KeyError(f"Character '{c}' (Unicode: U+{ord(c):04X}) not in vocabulary")
+
+    # Log unknown characters if any were found
+    if verbose and unknown_chars:
+        print(f"Warning: {len(unknown_chars)} unknown character(s) mapped to <UNK> token (ID={unk_token_id}):")
+        for char in sorted(unknown_chars):
+            print(f"  '{char}' (Unicode: U+{ord(char):04X})")
+
+    tokens = torch.tensor(token_list, dtype=torch.long)
     return tokens
 
 
